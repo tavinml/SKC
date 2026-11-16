@@ -10,4 +10,5 @@ import Foundation
 struct APOD: Codable {
     let title: String
     let date: String
+    let hdurl: String?
 }
