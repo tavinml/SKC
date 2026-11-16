@@ -27,8 +27,20 @@ class ViewController: UIViewController {
                 let posts = try await fetchAPOD(from: url)
                 print("APOD:", posts.first?.title ?? "Nenhuma opcao encontrada")
                 print("APOD:", posts.first?.date ?? " Sem publicacao")
+                print("APOD:", posts.first?.hdurl ?? "Publicação sem imagem")
                 titleLabel.text = posts.first?.title ?? "Nenhuma opção encontrada"
                 dateLabel.text = posts.first?.date ?? "Nenhuma opção encontrada"
+                
+                if let imageAdress = posts.first?.hdurl //confirmo que a publicacao tem hdurl
+                    , let imageURL = URL(string: imageAdress) { //tenta transformar o texto em uma url
+                    do {
+                        let image = try await fetchImage(from: imageURL) //baixo os dados
+                        apodImageView.image = image
+                    } catch {
+                        print("Falha ao carregar a imagem:", error)
+                    }
+                }
+                
             } catch {
                 print("Falha ao consultar o APOD:", error)
                 titleLabel.text = "Não foi possivel carregar a publicacao"
@@ -71,15 +83,27 @@ class ViewController: UIViewController {
         return imageView
     }()
     
+    private let imageContainerView: UIView = {
+        let containerView = UIView()
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        return containerView
+    }()
+    
     private let button: UIButton = {
         
-        let button = UIButton(type: .custom)
-        button.setTitle("botao", for: .normal)
-        button.layer.cornerRadius = 5
+        let button = UIButton(type: .system)
+        
+        button.setImage(UIImage(systemName: "heart"), for: .normal)
+        button.backgroundColor = .systemRed
+        button.layer.cornerRadius = 22
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.layer.backgroundColor = UIColor.green.cgColor
-        button.tintColor = .systemCyan
-        button.configuration = .glass()
+        
+//        button.setTitle("botao", for: .normal)
+//        button.layer.cornerRadius = 5
+//        button.translatesAutoresizingMaskIntoConstraints = false
+//        button.layer.backgroundColor = UIColor.green.cgColor
+//        button.tintColor = .systemCyan
+//        button.configuration = .glass()
         
         return button
     }()
@@ -89,20 +113,28 @@ class ViewController: UIViewController {
                                                       spacing: 4
     )
     
+    private lazy var contentStackView = StackComponent(axis: .vertical,
+                                                       arrangedSubViews: [headerStackView, apodImageView],
+                                                       spacing: 32
+    )
+    
     private func setupView() {
         view.backgroundColor = .white
 //        view.addSubview(customView)
 //        view.addSubview(button)
-        view.addSubview(headerStackView)
+//        view.addSubview(headerStackView)
+        view.addSubview(contentStackView)
         
     }
     
     private func setupConstraint() {
         let safeArea = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
-            headerStackView.topAnchor.constraint(equalTo: safeArea.topAnchor, constant: 16),
-            headerStackView.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor, constant: 16),
-            headerStackView.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor, constant: -16)
+            contentStackView.topAnchor.constraint(equalTo: safeArea.topAnchor, constant: 16),
+            contentStackView.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor, constant: 16),
+            contentStackView.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor, constant: -16),
+            apodImageView.heightAnchor.constraint(equalTo: apodImageView.widthAnchor, multiplier: 0.75)
+            
         ])
     }
     
