@@ -6,8 +6,24 @@
 //
 
 import UIKit
+import SwiftData
 
 class ViewController: UIViewController {
+    
+    private var isFavorite = false
+    private var currentAPOD: APOD? //precisa ser opcional pois precisa esperar a consulta da api
+    
+    private let modelContext: ModelContext
+    
+    init(modelContext: ModelContext) {
+        self.modelContext = modelContext
+        
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder){
+        fatalError("init(coder) nao foi implementado")
+    }
     
 
     override func viewDidLoad() {
@@ -16,6 +32,7 @@ class ViewController: UIViewController {
         setupView()
         setupConstraint()
         setupActions()
+       
         
         let endpoint  = "https://science.nasa.gov/wp-json/wp/v2/apod-basic/?api_key=DEMO_KEY"
         guard let url = URL(string: endpoint) else {
@@ -25,22 +42,19 @@ class ViewController: UIViewController {
         Task {
             do {
                 print("CSK: iniciando consulta ao APOD")
-                let posts = try await fetchAPOD(from: url)
-                print("APOD:", posts.first?.title ?? "Nenhuma opcao encontrada")
-                print("APOD:", posts.first?.date ?? " Sem publicacao")
-                print("APOD:", posts.first?.hdurl ?? "Publicação sem imagem")
-                titleLabel.text = posts.first?.title ?? "Nenhuma opção encontrada"
-                dateLabel.text = posts.first?.date ?? "Nenhuma opção encontrada"
                 
-                if let imageAdress = posts.first?.hdurl //confirmo que a publicacao tem hdurl
-                    , let imageURL = URL(string: imageAdress) { //tenta transformar o texto em uma url
-                    do {
-                        let image = try await fetchImage(from: imageURL) //baixo os dados
-                        apodImageView.image = image
-                    } catch {
-                        print("Falha ao carregar a imagem:", error)
-                    }
+                let posts = try await fetchAPOD(from: url)
+                
+                guard let apod = posts.first else {
+                    titleLabel.text = "Nenhuma publicação encontrada"
+                    return
                 }
+                
+                print("APOD:", apod.title)
+                print("APOD:", apod.date)
+                
+                await updateScreen(with: apod)
+                    
                 
             } catch {
                 print("Falha ao consultar o APOD:", error)
@@ -54,10 +68,39 @@ class ViewController: UIViewController {
         super.viewDidAppear(animated)
     }
     
-    private var isFavorite = false
+    
     
     private func setupActions() {
         favoriteButton.addTarget(self, action: #selector(tapFavoriteButton), for: .touchUpInside)
+        choseDataButton.addTarget(self, action: #selector(tapChooseDateButton), for: .touchUpInside)
+        randomDataButton.addTarget(self, action: #selector(tapRandomDataButton), for: .touchUpInside)
+    }
+    
+    private func updateScreen(with apod: APOD) async {
+        currentAPOD = apod //para conseguir guardar o objeto que será recebido
+        updateFavoriteState(for: apod)
+        
+        titleLabel.text = apod.title
+        dateLabel.text = apod.date
+        
+        if let credit = apod.credit {
+            let plainCredit = credit.htmlToPlainText
+            creditsLabel.text = "Créditos: \(plainCredit)"
+        } else {
+            creditsLabel.text = "Créditos não informados"
+        }
+        
+        apodImageView.image = UIImage(systemName: "photo")
+        
+        if let imageAdress = apod.hdurl //confirmo que a publicacao tem hdurl
+            , let imageURL = URL(string: imageAdress) { //tenta transformar o texto em uma url
+            do {
+                let image = try await fetchImage(from: imageURL) //baixo os dados
+                apodImageView.image = image
+            } catch {
+                print("Falha ao carregar a imagem:", error)
+            }
+        }
     }
     
     
@@ -80,6 +123,19 @@ class ViewController: UIViewController {
         return label
     }()
     
+    private let creditsLabel: UILabel = {
+        let label = UILabel()
+        
+        label.text = "Créditos:"
+        label.font = .preferredFont(forTextStyle: .subheadline)
+        label.textColor = .secondaryLabel
+        label.numberOfLines = 0
+        label.adjustsFontForContentSizeCategory = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        
+        return label
+    }()
+    
     private let apodImageView: UIImageView = {
         let imageView = UIImageView()
         imageView.image = UIImage(systemName: "photo")
@@ -96,6 +152,7 @@ class ViewController: UIViewController {
         containerView.translatesAutoresizingMaskIntoConstraints = false
         return containerView
     }()
+    
     
     private let favoriteButton: UIButton = {
         
@@ -117,14 +174,159 @@ class ViewController: UIViewController {
         return button
     }()
     
-    @objc
-    private func tapFavoriteButton() {
-        isFavorite.toggle()
+    private let choseDataButton: UIButton = {
+        var configuration = UIButton.Configuration.filled()
         
+        configuration.title = "Escolher data"
+        configuration.baseBackgroundColor = .systemBlue
+        configuration.baseForegroundColor = .white
+        configuration.cornerStyle = .capsule
+        
+        let button = UIButton(configuration: configuration)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        
+        return button
+    }()
+    
+    private let randomDataButton: UIButton = {
+        var configuration = UIButton.Configuration.filled()
+        
+        configuration.title = "Data aleatória"
+        configuration.baseBackgroundColor = .systemBlue
+        configuration.baseForegroundColor = .white
+        configuration.cornerStyle = .capsule
+        
+        let button = UIButton(configuration: configuration)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        
+        return button
+    }()
+    
+    private func updateFavoritesButtonApearence() {
         let symbolName = isFavorite ? "heart.fill" : "heart"
+        
         favoriteButton.setImage(UIImage(systemName: symbolName), for: .normal)
         favoriteButton.tintColor = isFavorite ? .systemRed : .systemGray
     }
+    
+    private func updateFavoriteState(for apod: APOD) {
+        do {
+            isFavorite = try findFavorite(for: apod) != nil
+        } catch {
+            isFavorite = false
+            print("Não foi possivel consultar o favorito", error)
+        }
+        
+        updateFavoritesButtonApearence()
+    }
+    
+    @objc
+    private func tapFavoriteButton() {
+        guard let currentAPOD else {
+            return
+        } //preciso fazer isso pois a tela aparece antes da API carregar
+        
+        do {
+            //caso a busca encontre uma publicacao, ela já é salva
+            if let savedFavorite = try findFavorite(for: currentAPOD) {
+                modelContext.delete(savedFavorite)
+                isFavorite = false
+            } else {
+                let favorite = FavoriteAPOD(date: currentAPOD.date,
+                                            title: currentAPOD.title,
+                                            hdurl: currentAPOD.hdurl,
+                                            credit: currentAPOD.credit)
+                
+                modelContext.insert(favorite)
+                isFavorite = true
+            }
+            
+            try modelContext.save()
+            updateFavoritesButtonApearence()
+        } catch {
+            print("Não foi possível alterar o favorito", error)
+        }
+    }
+    
+    @objc
+    private func tapChooseDateButton() {
+        let datePickerController = DatePickerController()
+        datePickerController.title = "Escolher data"
+        
+        datePickerController.onDateSelected = { [weak self] selectedDate in
+            guard let self else { // verifica se a viewController ainda existe
+                return
+            }
+            
+            Task { //precisa ser uma task pois a consulta é async
+                do {
+                    self.titleLabel.text = "Carregando publicação"
+                    
+                    let apod = try await fetchAPOD(for: selectedDate) //envia a data para o serviço e devolve um APOD
+                    
+                    await self.updateScreen(with: apod) //faz a atualização do título, data, imagem e créditos
+                } catch {
+                    print("Falha ao buscar a data escolhida:", error)
+                    self.titleLabel.text = "Não foi possível carregar a publicação"
+                }
+            }
+            
+        }
+        
+        let navigationController = UINavigationController(rootViewController: datePickerController)
+        
+        if let sheet = navigationController.sheetPresentationController {
+            sheet.detents = [
+                .medium(),
+                .large()
+            ]
+            
+            sheet.prefersGrabberVisible = true
+        }
+        present(navigationController,
+                animated: true)
+    }
+    
+    @objc
+    private func tapRandomDataButton() {
+        let calendar = Calendar.current
+        
+        //data que o APOD foi criado
+        let startComponents = DateComponents(year: 1995,
+                                             month: 6,
+                                             day: 16)
+        
+        //para conseguir representar uma data
+        guard let startDate = calendar.date(from: startComponents) else {
+            return
+        }
+        
+        //representar a quantidade de segundas desde 1970 e transformamos em numero
+        let startTime = startDate.timeIntervalSince1970
+        let currentTime = Date().timeIntervalSince1970
+        
+        //fazendo o sorteio
+        let randomTime = TimeInterval.random(in: startTime...currentTime)
+        
+        //usando o numero sorteado e transformando em uma data
+        let randomDate = Date(timeIntervalSince1970: randomTime)
+        
+        Task {
+            do {
+                titleLabel.text = "Carregando publicação"
+                
+                let apod = try await fetchAPOD(for: randomDate)
+                
+                await updateScreen(with: apod)
+                
+            } catch {
+                print("Falha ao buscar uma data aleatória:", error)
+                titleLabel.text = "Não foi possível carregar a publicação"            }
+        }
+        
+    }
+    
+
     
     private lazy var headerStackView = StackComponent(axis: .vertical,
                                                       arrangedSubViews:[titleLabel, dateLabel],
@@ -132,9 +334,16 @@ class ViewController: UIViewController {
     )
     
     private lazy var contentStackView = StackComponent(axis: .vertical,
-                                                       arrangedSubViews: [headerStackView, imageContainerView],
+                                                       arrangedSubViews: [headerStackView, mediaStackView, actionsStackView],
                                                        spacing: 32
     )
+    
+    private lazy var mediaStackView = StackComponent(axis: .vertical,
+                                                     arrangedSubViews: [imageContainerView, creditsLabel],
+                                                     spacing: 8)
+    private lazy var actionsStackView = StackComponent(axis: .horizontal,
+                                                       arrangedSubViews: [choseDataButton, randomDataButton],
+                                                       spacing: 16)
     
     private func setupView() {
         view.backgroundColor = .white
@@ -164,11 +373,31 @@ class ViewController: UIViewController {
         ])
     }
     
+    private func findFavorite(for apod: APOD) throws -> FavoriteAPOD? {
+        let apodDate = apod.date
+        
+        //descreve o que tem que ser buscado, ou seja, um objeto FavoriteAPOD
+        let descriptor = FetchDescriptor<FavoriteAPOD>(predicate: #Predicate { favorite in  favorite.date == apodDate //predicate funciona como um filtro de a data do favorito ser igual a data do apod atual
+    
+            }
+        )
+        
+        return try modelContext.fetch(descriptor).first
+    }
+
+    
 }
 
 #Preview {
-    let controller = ViewController()
+    let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+
+    let container = try! ModelContainer(for: FavoriteAPOD.self, configurations: configuration
+    )
+
+    let controller = ViewController(modelContext: container.mainContext)
+
     controller.title = "Explorar"
+
     return UINavigationController(rootViewController: controller)
 }
 

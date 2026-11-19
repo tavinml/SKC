@@ -6,10 +6,13 @@
 //
 
 import UIKit
+import SwiftData
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     var window: UIWindow?
+    private var modelContainer: ModelContainer?
+
 
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
@@ -18,16 +21,19 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // This delegate does not imply the connecting scene or session are new (see `application:configurationForConnectingSceneSession` instead).
         guard let windowScene = (scene as? UIWindowScene) else { return }
         
-        let rootViewController = ViewController()
-               let navigationController = UINavigationController(
-                   rootViewController: rootViewController
-               )
-
-               let window = UIWindow(windowScene: windowScene)
-               window.rootViewController = navigationController
-               window.makeKeyAndVisible()
-
-               self.window = window
+        let window = UIWindow(windowScene: windowScene)
+                
+        do {
+            let modelContainer = try ModelContainer(for: FavoriteAPOD.self)
+            
+            self.modelContainer = modelContainer
+            
+            window.rootViewController = MainTabBarController(modelContext: modelContainer.mainContext)
+        } catch {
+            fatalError("Não foi possível configurar o SwiftData: \(error)")
+        }
+        self.window = window
+        window.makeKeyAndVisible()
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
